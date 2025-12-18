@@ -1,0 +1,285 @@
+---
+title: "SML312 Modeling"
+author: "Remy Garcia-Kakebeen"
+date: "2025-12-17"
+output: pdf_document
+---
+
+# Modeling
+
+## Calculating Recall Function
+
+```{r recall-function}
+calc_recall <- function(y_true, y_pred) {
+  y_true <- factor(y_true)
+  y_pred <- factor(y_pred, levels = levels(y_true))
+  
+  tp <- sum(y_true == "1" & y_pred == "1")
+  fn <- sum(y_true == "1" & y_pred == "1")
+}
+```
+
+## Predicting Cyber Role based on Degree Type
+
+### Data Prep
+
+```{r logistic-regression-prep}
+# only take each person's highest degree
+degree_levels <- c("High School" = 1,
+                   "Associate" = 2, 
+                   "Bachelor" = 3, 
+                   "Master" = 4, 
+                   "MBA" = 5,
+                   "Doctor" = 6)
+
+nonskills_cut <- sample_nonskills |>
+  mutate(deg_rank = degree_levels[degree]) |>
+  group_by(user_id) |>
+  slice_max(order_by = deg_rank, n = 1, with_ties = F) |>
+  ungroup()
+
+# turn degree into factor column
+univar_df_cat <- nonskills_cut |>
+  select(user_id, role_k1500, university_name, field, degree) |>
+  filter(!is.na(degree)) |>
+  distinct() |>
+  mutate(cyber = ifelse(role_k1500 %in% cyber_roles, 1, 0)) |>
+  mutate(cyber = factor(cyber),
+         degree = factor(degree,
+                         levels = c("High School", "Associate", "Bachelor", 
+                                    "Master", "MBA", "Doctor")))
+```
+
+```{r view-edited-df}
+# viewing edited dataframe
+head(univar_df_cat, 5)
+```
+
+```{r one-hot-encoding-logistic-regression-prep}
+# one-hot encode degrees
+univar_df_ohe <- dummy_cols(
+  univar_df_cat,
+  select_columns = 'degree',
+  remove_first_dummy = T,
+  remove_selected_columns = T
+) |>
+  drop_na() |>
+  select(-user_id, -role_k1500, -university_name, -field)
+```
+
+```{r view-ohe-df}
+head(univar_df_ohe, 5)
+```
+
+### Logistic Regression Models 
+
+```{r univariable-binary-logistic-regression}
+# creating the model (without one-hot encoding)
+model_cat <- glm(cyber ~ degree,
+              data = univar_df_cat, 
+              family = "binomial")
+
+summary(model_cat)
+
+plot_model(model_cat,
+           type = 'pred',
+           terms = 'degree') +
+labs(title = "Predicted Probabilities of Going into Cyber-Related Roles") +
+theme_minimal()
+```
+
+```{r univariable-binary-logistic-regression-onehotencoding}
+# train the model
+model_ohe = train(cyber ~ ., data = univar_df_ohe, method = 'glm')
+
+# summarize the model
+summary(model_ohe)
+
+# put model results into a dataframe for easy plotting
+effects_ohe <- ggpredict(model_ohe$finalModel, terms = NULL)
+degrees_df_ohe <- bind_rows(lapply(effects_ohe, as.data.frame), 
+                            .id = "term")
+
+# plotting the model for each degree level
+ggplot(degrees_df_ohe, aes(x = x, y = predicted)) +
+  geom_line() +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.2) +
+  facet_wrap(~ term, scales = "free_x") +
+  labs(
+    title = "Predicted Probabilities of Going into Cyber-Related Roles",
+    subtitle = "for Each Degree",
+    x = "Predictor value",
+    y = "Predicted probability"
+  ) +
+  theme_minimal()
+
+```
+
+### Naive Bayes Model
+
+```{r naive-bayes degree-cyber}
+# split data into training & testing datasets
+split <- sample.split(univar_df_ohe$cyber, SplitRatio = 0.8)
+train_ohe <- subset(univar_df_ohe, split == T)
+test_ohe <- subset(univar_df_ohe, split == F)
+
+# we would scale numeric columns here, but they're all ones and zeros
+
+# training the model (e1071)
+classifier <- naiveBayes(cyber ~ ., data = train_ohe)
+
+# predicting whether someone's in cyber
+y_pred <- predict(classifier, newdata = test_ohe)
+
+# evaluating the model
+cm <- table(test_ohe$cyber, y_pred)
+confusionMatrix(cm)
+
+paste0("Recall: ", round(calc_recall(test_ohe$cyber, y_pred), 4))
+```
+
+### Decision Tree Model
+
+```{r decision-tree degree-cyber}
+# split data into training & testing datasets
+split <- sample.split(univar_df_ohe$cyber, SplitRatio = 0.8)
+train_ohe <- subset(univar_df_ohe, split == T)
+test_ohe <- subset(univar_df_ohe, split == F)
+
+# recipe to handle unseen factors
+rec <- recipe(cyber ~ ., data = train_ohe) |>
+  step_novel(all_nominal_predictors()) |>
+  step_unknown(all_nominal_predictors()) |>
+  step_other(all_nominal_predictors(), threshold = 0.005)
+
+# create decision tree model specification
+tree_spec <- decision_tree() |>
+  set_engine("rpart") |>
+  set_mode("classification")
+
+# workflow
+flow <- workflow() |>
+  add_model(tree_spec) |>
+  add_recipe(rec)
+
+# fit model to training data
+tree_fit <- flow |>
+  fit(data = train_ohe)
+
+# evaluating the decision tree modelling performance
+predictions <- predict(tree_fit, test_ohe)
+
+# another confusion matrix
+cm <- table(test_ohe$cyber, predictions$.pred_class)
+confusionMatrix(cm)
+
+paste0("Recall: ", round(calc_recall(test_ohe$cyber, y_pred), 4))
+```
+### Random Forests
+
+```{r random-forest}
+split <- sample.split(univar_df_ohe$cyber, SplitRatio = 0.8)
+train_ohe <- subset(univar_df_ohe, split == TRUE)
+test_ohe  <- subset(univar_df_ohe, split == FALSE)
+
+rf <- randomForest(cyber ~ ., data = train_ohe)
+
+print(rf)
+```
+
+### Neural Network
+
+```{r simple-nn}
+# split data into training & testing datasets
+set.seed(123)
+split <- sample.split(univar_df_ohe$cyber, SplitRatio = 0.8)
+train_ohe <- subset(univar_df_ohe, split == T)
+test_ohe <- subset(univar_df_ohe, split == F)
+
+nnetwork <- neuralnet(cyber ~ .,
+                      data = train_ohe,
+                      hidden = c(5, 5),
+                      linear.output = F,
+                      lifesign = 'full',
+                      rep = 1)
+
+plot(nnetwork, col.hidden = 'darkgreen',
+     col.hidden.synapse = 'darkgreen',
+     show.weights = F,
+     information = F,
+     fill = 'lightblue')
+```
+
+## Predicting Cyber Role based on Skill Set
+
+### Naive Bayes
+
+```{r naive-bayes skills-cyber}
+# citation: https://www.geeksforgeeks.org/r-language/naive-bayes-classifier-in-r-programming/
+library(e1071)
+library(caTools)
+
+set.seed(123)
+sample_skills_naive <- sample_skills |>
+  select(-user_id, -skill_source)
+
+# split data into training & testing datasets
+split <- sample.split(sample_skills_naive$cyber, SplitRatio = 0.8)
+train_skills <- subset(sample_skills_naive, split == T)
+test_skills <- subset(sample_skills_naive, split == F)
+
+# we would scale numeric columns here, but there are no numeric columns
+
+# training the model (e1071)
+classifier <- naiveBayes(cyber ~ ., data = train_skills)
+
+# predicting whether someone's in cyber
+y_pred <- predict(classifier, newdata = test_skills)
+
+# evaluating the model
+cm <- table(test_skills$cyber, y_pred)
+confusionMatrix(cm)
+
+
+```
+
+### Decision Tree
+
+```{r decision-tree}
+# we'll split nonskills into training & testing splits
+sample_nonskills_dectree <- sample_nonskills |>
+  select(-user_id, -country, -position_id, -role_k1500, -fullname, -user_country)
+
+# split data into training & testing datasets
+set.seed(123)
+split <- sample.split(sample_nonskills_dectree$cyber, SplitRatio = 0.8)
+train_dectree <- subset(sample_nonskills_dectree, split == T)
+test_dectree <- subset(sample_nonskills_dectree, split == F)
+
+# recipe to handle unseen factors
+rec <- recipe(cyber ~ ., data = train_dectree) |>
+  step_novel(all_nominal_predictors()) |>
+  step_unknown(all_nominal_predictors()) |>
+  step_other(all_nominal_predictors(), threshold = 0.005)
+
+# create decision tree model specification
+tree_spec <- decision_tree() |>
+  set_engine("rpart") |>
+  set_mode("classification")
+
+# workflow
+flow <- workflow() |>
+  add_model(tree_spec) |>
+  add_recipe(rec)
+
+# fit model to training data
+tree_fit <- flow |>
+  fit(data = train_dectree)
+
+# evaluating the decision tree modelling performance
+predictions <- predict(tree_fit, test_dectree)
+
+# another confusion matrix
+cm <- table(test_dectree$cyber, predictions$.pred_class)
+confusionMatrix(cm)
+```

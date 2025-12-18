@@ -1,0 +1,527 @@
+---
+title: "SML312 Initial Data Exploration"
+author: "Remy Garcia-Kakebeen"
+date: "2025-12-17"
+output: pdf_document
+---
+
+## Loading Libraries
+
+```{r libraries, include = F}
+# libraries
+library(dplyr)
+library(tidyverse)
+
+library(ggplot2)
+library(GGally)
+library(corrplot)
+
+library(corrplot)
+
+# citation: https://cran.r-project.org/web/packages/fastDummies/fastDummies.pdf
+library(fastDummies)
+library(sjPlot)
+
+library(caret)
+library(lattice)
+library(ggeffects)
+
+# citation: https://www.datacamp.com/tutorial/decision-trees-R
+library(tidymodels)
+library(tidyr)
+
+# citation: https://www.geeksforgeeks.org/r-language/naive-bayes-classifier-in-r-programming/
+library(e1071)
+library(caTools)
+
+# citation: https://www.r-bloggers.com/2021/04/random-forest-in-r/
+library(randomForest)
+
+# citation: https://www.r-bloggers.com/2021/04/deep-neural-network-in-r/
+library(keras)
+library(mlbench)
+library(magrittr)
+library(neuralnet)
+```
+
+## USA-Specific Datasets
+
+```{r usa-datasets, include = F}
+# user skills in the USA
+USA_skills_df <- readr::read_csv("USA_skills.csv")
+
+# job postings in the USA
+USA_t100_postings <- readr::read_csv("USA_t100_postings.csv")
+
+# user data in the USA (without skills)
+USA_nonskills_df <- readr::read_csv("USA_nonskills.csv")
+```
+
+## Roles & Role Categories
+
+```{r role-categories, include = F}
+# CYBER-RELATED ROLES
+# each cyber-related role category
+feeder_roles <- readr::read_lines('feeder_roles.txt')
+starting_roles <- readr::read_lines('starting_roles.txt')
+intermediate_roles <- readr::read_lines('intermediate_roles.txt')
+advanced_roles <- readr::read_lines('advanced_roles.txt')
+
+# starting, intermediate, and advanced combined
+cyber_roles <- readr::read_lines('cyber_roles.txt')
+
+# ALL POSSIBLE ROLES
+# df with all roles & their categories
+roles_df <- readr::read_csv("role_cats.csv")
+
+# roles
+k1500_roles <- readr::read_csv("1500_roles.txt")
+k150_roles <- readr::read_csv("150_roles.txt")
+k50_roles <- readr::read_csv("50_roles.txt")
+
+# add column that determines whether a role is a cyber-related role or not
+# also add column that determines whether a role is a feeder role into cyber or not
+roles_df <- roles_df |>
+  mutate(cyber_job = ifelse(role_k1500 %in% cyber_roles, 1, 0)) |>
+  mutate(feeder_job = ifelse(role_k1500 %in% feeder_roles, 1, 0))
+```
+
+```{r cyber-role-category-addition, include = F}
+# adding cyber & feeder role columns to all datasets
+USA_t100_postings <- USA_t100_postings |>
+  mutate(cyber = as.factor(ifelse(role_k1500 %in% cyber_roles, 1, 0)),
+         feeder = as.factor(ifelse(role_k1500 %in% feeder_roles, 1, 0)))
+
+USA_nonskills_df <- USA_nonskills_df |>
+  mutate(cyber = as.factor(ifelse(role_k1500 %in% cyber_roles, 1, 0)),
+         feeder = as.factor(ifelse(role_k1500 %in% feeder_roles, 1, 0)))
+```
+
+# Exploring t100 Postings, Nonskills, & Skills Datasets
+
+```{r previewing-usa-t100-postings}
+dim(USA_t100_postings) # dimensions: 4,320,223 rows x 30 columns
+head(USA_t100_postings) # first 10 rows
+tail(USA_t100_postings) # last 10 rows
+```
+
+```{r previewing-usa-nonskills}
+dim(USA_nonskills_df) # dimensions: 7,696,123 rows x 30 columns
+head(USA_nonskills_df) # first 10 rows
+tail(USA_nonskills_df) # last 10 rows
+```
+
+```{r previewing-usa-skills}
+dim(USA_skills_df) # dimensions: 127,684,381 rows x 4 columns
+head(USA_skills_df) # first 10 rows
+tail(USA_skills_df) # last 10 rows
+```
+
+## Sampling Data for Easier Testing
+
+```{r sample}
+sample_t100 <- USA_t100_postings |>
+  slice_sample(n = round(nrow(USA_t100_postings)/10)) |>
+  mutate(cyber = ifelse(role_k1500 %in% cyber_roles, 1, 0))
+
+sample_nonskills <- USA_nonskills_df |>
+  slice_sample(n = round(nrow(USA_nonskills_df)/10)) |>
+  mutate(cyber = ifelse(user_id %in% cyb_id, 1, 0))
+
+# 1/100th of the rows since it's so much larger than the others
+sample_skills <- USA_skills_df |>
+  slice_sample(n = round(nrow(USA_skills_df)/100)) |>
+  mutate(cyber = ifelse(user_id %in% cyb_id, 1, 0))
+```
+
+```{r helpful-vectors}
+sub_id <- USA_nonskills_df |>
+  select(user_id) |>
+  distinct()
+
+cyb_id <- USA_nonskills_df |>
+  filter(cyber == 1) |>
+  select(user_id) |>
+  distinct() |> pull(user_id)
+```
+
+# Job (Top 100) Postings
+
+## Exploring Cyber/Feeder Role Distributions
+
+```{r cyber-role-count-by-ticker}
+# cyber roles distribution in role_k1500 level
+sample_t100 |>
+  filter(role_k1500 %in% cyber_roles) |>
+  group_by(ticker) |>
+  select(ticker, role_k1500) |>
+  count(role_k1500) |>
+  ggplot(aes(x = n, y = reorder(role_k1500, n), fill = ticker)) +
+  geom_bar(position = "stack", stat = "identity") +
+  labs(title = "Amount of Jobs for Each Role in the S&P Top 100 Companies",
+       subtitle = "All Cyber-Related Roles",
+       x = "Count",
+       y = "Cyber-Related Roles (Out of 1500 Levels)") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+# cyber roles distribution in role_k150 level
+sample_t100 |>
+  filter(role_k1500 %in% cyber_roles) |>
+  group_by(ticker) |>
+  select(ticker, role_k150) |>
+  count(role_k150) |>
+  ggplot(aes(x = n, y = reorder(role_k150, n), fill = ticker)) +
+  geom_bar(position = "stack", stat = "identity") +
+  labs(title = "Amount of Jobs for Each Role in the S&P Top 100 Companies",
+       subtitle = "All Cyber-Related Roles",
+       x = "Count",
+       y = "Cyber-Related Roles (Out of 150 Levels)") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+```{r feeder-role-count-by-ticker}
+# feeder roles distribution in role_k1500 level
+sample_t100 |>
+  filter(role_k1500 %in% feeder_roles) |>
+  group_by(ticker) |>
+  select(ticker, role_k1500) |>
+  count(role_k1500) |>
+  ggplot(aes(x = n, y = reorder(role_k1500, n), fill = ticker)) +
+  geom_bar(position = "stack", stat = "identity") +
+  labs(title = "Amount of Jobs for Each Role in the S&P Top 100 Companies",
+       subtitle = "All Cyber Feeder Roles",
+       x = "Count",
+       y = "Cyber Feeder Roles (Out of 1500 Levels)") +
+  theme_minimal() +  
+  theme(legend.position = "none") 
+
+# feeder roles distribution in role_k150 level
+sample_t100 |>
+  filter(role_k1500 %in% feeder_roles) |>
+  group_by(ticker) |>
+  select(ticker, role_k150) |>
+  count(role_k150) |>
+  ggplot(aes(x = n, y = reorder(role_k150, n), fill = ticker)) +
+  geom_bar(position = "stack", stat = "identity") +
+  labs(title = "Amount of Jobs for Each Role in the S&P Top 100 Companies",
+       subtitle = "All Cyber Feeder Roles",
+       x = "Count",
+       y = "Cyber Feeder Roles (Out of 150 Levels)") +
+  theme_minimal() +  
+  theme(legend.position = "none") 
+```
+
+```{r states-for-cyber-postings}
+# top states in the US for cyber jobs (positions filled)
+USA_t100_postings |>
+  filter(role_k1500 %in% cyber_roles) |>
+  filter(country == "United States" & !is.na(state)) |>
+  count(state) |>
+  ggplot(aes(x = n, y = reorder(state, n))) +
+  geom_bar(position = "stack", stat = "identity",
+           fill = 'midnightblue', color = 'white') +
+  theme(legend.position = "none") +
+  labs(title = "Number of Job Postings in Cyber-Related Roles by U.S. State",
+       subtitle = "All Cyber-Related Roles",
+       x = "Count",
+       y = "U.S. State") +
+  theme_minimal()
+```
+
+```{r cyber-job-postings-filled}
+# how many cyber-related jobs were posted between June 2024 and June 2025?
+number_cyber_jobs_posted <- USA_t100_postings |>
+  filter(role_k1500 %in% cyber_roles) |>
+  select(role_k1500) |>
+  count(role_k1500) |>
+  mutate(sum = sum(n)) |>
+  select(sum) |> distinct() |> pull(sum)
+
+paste0("The number of cyber-related jobs posted between June 2024 and June 2025 is ", number_cyber_jobs_posted, ".")
+
+# how many cyber-related jobs were filled between June 2024 and June 2025?
+number_cyber_jobs_filled <- USA_t100_postings |>
+  filter(role_k1500 %in% cyber_roles) |>
+  filter(!is.na(remove_date)) |>
+  count(role_k1500) |>
+  mutate(sum = sum(n)) |>
+  select(sum) |> distinct() |> pull(sum)
+
+paste0("The number of cyber-related jobs filled that were posted between June 2024 and June 2025 is ", number_cyber_jobs_filled, ".")
+
+# percent of jobs filled out of those posted between June 2024 and June 2025 
+paste0("This suggests that, out of the jobs posted in a year, ", round(number_cyber_jobs_filled/number_cyber_jobs_posted, 4)*100, 
+       "% have been filled.")
+```
+
+# Nonskills (Positions, Education, Demographics) Dataset
+
+## Cyber Positions Filled Distribution by State
+
+```{r user-nonskills-numbers}
+# checking number of individuals in cyber roles vs those not in cyber roles
+num_cyber <- nrow(USA_nonskills_df |>
+  filter(role_k1500 %in% cyber_roles))
+
+num_non <- nrow(USA_nonskills_df |>
+  filter(!(role_k1500 %in% cyber_roles)))
+
+paste0('About ', round(num_cyber/nrow(USA_nonskills_df), 2)*100, '% of individuals in this dataset are in cyber-related positions.')
+
+# top states in the US for cyber jobs (positions filled)
+sample_nonskills |>
+  filter(role_k1500 %in% cyber_roles) |>
+  filter(country == "United States" & !is.na(state)) |>
+  count(state) |>
+  ggplot(aes(x = n, y = reorder(state, n))) +
+  geom_bar(position = "stack", stat = "identity",
+           fill = 'pink', color = 'white') +
+  theme(legend.position = "none") +
+  labs(title = "Number of Individuals in Cyber-Related Roles by U.S. State",
+       subtitle = "All Cyber-Related Roles",
+       x = "Count",
+       y = "U.S. State") +
+  theme_minimal()
+```
+
+## Exploring Salary & Seniority Distributions
+
+```{r}
+# exploring salary distribution
+sample_nonskills |>
+  filter(!is.na(salary)) |>
+  ggplot() +
+  geom_histogram(mapping = aes(x = salary, y = after_stat(density)),
+                 binwidth = 2e4,
+                 fill = "coral", color = "white") +
+  theme_minimal() +
+  labs(title = "Salary Distribution",
+       subtitle = "Employees of the Top 100 S&P 500 Companies",
+       x = "Salary",
+       y = "Density")
+
+# seniority distribution
+sample_nonskills |>
+  filter(!is.na(seniority)) |>
+  ggplot() +
+  geom_histogram(mapping = aes(x = seniority, y = after_stat(count)),
+                 binwidth = 1,
+                 fill = "aquamarine", color = "white") +
+  theme_minimal() +
+  labs(title = "Seniority Distribution",
+       subtitle = "Employees of the Top 100 S&P 500 Companies",
+       x = "Seniority",
+       y = "Density")
+```
+
+```{r}
+# salary distribution by gender
+sample_nonskills |>
+  filter(!is.na(salary) & sex_predicted != ".") |>
+  ggplot() +
+  geom_histogram(mapping = aes(x = salary, 
+                               y = after_stat(density), 
+                               fill = sex_predicted),
+                 binwidth = 2e4, alpha = 0.4,
+                 position = "identity") +
+  geom_density(mapping = aes(x = salary,
+                             color = sex_predicted)) +
+  theme_minimal() +
+  labs(title = "Salary Distribution",
+       subtitle = "Employees of the Top 100 S&P 500 Companies",
+       x = "Salary",
+       y = "Density")
+
+# seniority distribution by gender
+sample_nonskills |>
+  filter(!is.na(seniority) & sex_predicted != ".") |>
+  ggplot() +
+  geom_histogram(mapping = aes(x = seniority, 
+                               y = after_stat(density),
+                               fill = sex_predicted),
+                 binwidth = 1, alpha = 0.4,
+                 position = "identity") +
+  theme_minimal() +
+  labs(title = "Seniority Distribution",
+       subtitle = "Employees of the Top 100 S&P 500 Companies",
+       x = "Seniority",
+       y = "Density")
+
+```
+
+```{r}
+# salary distribution by cyber vs non-cyber roles
+sample_nonskills |>
+  filter(!is.na(salary) & !is.na(cyber)) |>
+  ggplot() +
+  geom_histogram(mapping = aes(x = salary, 
+                               y = after_stat(density), 
+                               fill = cyber),
+                 binwidth = 2e4, alpha = 0.4,
+                 position = "identity") +
+  geom_density(mapping = aes(x = salary,
+                             color = cyber)) +
+  theme_minimal() +
+  labs(title = "Salary Distribution Between Cyber Roles & Non-Cyber Roles",
+       subtitle = "Employees of the Top 100 S&P 500 Companies",
+       x = "Salary",
+       y = "Density")
+
+# seniority distribution by cyber vs non-cyber roles
+sample_nonskills |>
+  filter(!is.na(seniority) & !is.na(cyber)) |>
+  ggplot() +
+  geom_histogram(mapping = aes(x = seniority, 
+                               y = after_stat(density),
+                               fill = cyber),
+                 binwidth = 1, alpha = 0.4,
+                 position = "identity") +
+  theme_minimal() +
+  labs(title = "Seniority Distribution",
+       subtitle = "Employees of the Top 100 S&P 500 Companies",
+       x = "Seniority",
+       y = "Density")
+```
+
+# Correlation Plots (Numeric Variables + Cyber/Feeder) & GGPairs
+
+```{r correlations-t100-postings}
+# ggpairs of t100 postings numeric vars with cyber/feeder roles
+gg <- sample_t100 |>
+  drop_na() |>
+  ggpairs(progress = F,
+          columns = c('salary', 'salary_min', 'salary_max',
+                      'expected_hires', 'feeder', 'cyber'),
+          upper = list(continuous = wrap("cor", size = 2.2)),
+          diag = list(continuous = wrap("densityDiag", alpha = 0.3)),
+          lower = list(continuous = wrap("points", alpha = 0.3, size=0.1))) +
+    labs(title = 'Pairwise relationships between numeric vars & cyber/feeder roles') +
+    theme(axis.text.x = element_text(angle = 45),
+          legend.position = "bottom")
+
+suppressMessages(print(gg))
+
+# also checking collinearity
+sample_t100 |>
+  mutate(cyber = as.numeric(cyber),
+         feeder = as.numeric(feeder)) |>
+  select_if(is.numeric) |>
+  select(-rcid, -ultimate_parent_rcid) |>
+  cor(use = "pairwise.complete.obs") |>
+  corrplot.mixed(order = "FPC", upper = "ellipse",
+                 bg = "grey", tl.col = "black",
+                 tl.pos = 'lt',
+                 main = 'Simple Correlation Plot between Job Postings Numeric Variables')
+
+```
+
+```{r correlations-nonskills-position-postings}
+# ggpairs of user position numeric vars with cyber/feeder roles
+gg <- sample_nonskills |>
+  drop_na() |>
+  ggpairs(progress = F,
+          columns = c('remote_suitability', 'weight', 'start_salary', 'end_salary', 'salary', 
+                      'total_compensation', 'additional_compensation', 'feeder', 'cyber'),
+          upper = list(continuous = wrap("cor", size = 2.2)),
+          diag = list(continuous = wrap("densityDiag", alpha = 0.3)),
+          lower = list(continuous = wrap("points", alpha = 0.3, size=0.1))) +
+    labs(title = 'Pairwise relationships between numeric vars & cyber/feeder roles') +
+    theme(axis.text.x = element_text(angle = 45),
+          legend.position = "bottom")
+
+suppressMessages(print(gg))
+
+# also checking collinearity
+sample_nonskills |>
+  mutate(cyber = as.numeric(cyber),
+         feeder = as.numeric(feeder)) |>
+  select_if(is.numeric) |>
+  select(-m_prob, -f_prob, -white_prob, -black_prob, -api_prob, -hispanic_prob, 
+         -native_prob, -multiple_prob, -position_id, -seniority, -user_id, -weight, -prestige) |>
+  cor(use = "pairwise.complete.obs") |>
+  corrplot.mixed(order = "FPC", upper = "ellipse",
+                 bg = "navajowhite3", tl.col = "black",
+                 tl.pos = 'lt',
+                 main = 'Simple Correlation Plot between User Positions Numeric Variables')
+```
+
+```{r correlations-nonskills-demographics-postings}
+# ggpairs of user demographics numeric vars with cyber/feeder roles
+gg <- sample_nonskills |>
+  drop_na() |>
+  ggpairs(progress = F,
+          columns = c('f_prob', 'm_prob', 'white_prob', 'black_prob', 'api_prob', 'hispanic_prob',
+                      'native_prob', 'multiple_prob', 'sex_predicted', 'ethnicity_predicted', 
+                      'numconnections', 'feeder', 'cyber'),
+          upper = list(continuous = wrap("cor", size = 2.2)),
+          diag = list(continuous = wrap("densityDiag", alpha = 0.3)),
+          lower = list(continuous = wrap("points", alpha = 0.3, size=0.1))) +
+    labs(title = 'Pairwise relationships between numeric vars & cyber/feeder roles') +
+    theme(axis.text.x = element_text(angle = 45),
+          legend.position = "bottom")
+
+suppressMessages(print(gg))
+
+# also checking collinearity
+sample_nonskills |>
+  mutate(cyber = as.numeric(cyber),
+         feeder = as.numeric(feeder)) |>
+  select_if(is.numeric) |>
+  select(-seniority, -prestige, -education_number, -position_number, -user_id, -weight,
+         -salary, -start_salary, -end_salary, -total_compensation, -additional_compensation, 
+         -remote_suitability) |>
+  cor(use = "pairwise.complete.obs") |>
+  corrplot.mixed(order = "FPC", upper = "ellipse",
+                 bg = "grey", tl.col = "black",
+                 tl.pos = 'lt',
+                 main = 'Simple Correlation Plot between User Demographics/Education Numeric Variables')
+```
+
+# Exploring the Skills Dataset
+
+## Skills for Cyber Roles vs Non-Cyber Roles
+
+```{r skills-dataset-exploration}
+mapped_skills <- readr::read_lines('mapped_skills.txt')
+
+USA_skills_df |>
+  select(skill_mapped) |>
+  distinct()
+
+USA_skills_df |>
+  filter(user_id %in% cyb_id,
+         skill_mapped != "empty") |>
+  group_by(skill_mapped) |>
+  count(skill_mapped) |>
+  ungroup() |>
+  slice_max(order_by = n, n = 50) |>
+  ggplot(aes(x = n, y = reorder(skill_mapped, n))) +
+  geom_bar(position = "stack", stat = "identity",
+           fill = 'turquoise', color = 'white') +
+  theme(legend.position = "none") +
+  labs(title = "50 Most Common Skills in Cyber Roles",
+       subtitle = "Out of 3000 mapped skills",
+       x = "Count",
+       y = "Mapped Skill") +
+  theme_minimal()
+
+USA_skills_df |>
+  filter(!(user_id %in% cyb_id),
+         skill_mapped != "empty") |>
+  group_by(skill_mapped) |>
+  count(skill_mapped) |>
+  ungroup() |>
+  slice_max(order_by = n, n = 50) |>
+  ggplot(aes(x = n, y = reorder(skill_mapped, n))) +
+  geom_bar(position = "stack", stat = "identity",
+           fill = 'tomato', color = 'white') +
+  theme(legend.position = "none") +
+  labs(title = "50 Most Common Skills in Non-Cyber Roles",
+       subtitle = "Out of 3000 mapped skills",
+       x = "Count",
+       y = "Mapped Skill") +
+  theme_minimal()
+  
+```

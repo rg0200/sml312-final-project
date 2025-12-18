@@ -1,0 +1,136 @@
+---
+title: "SML312 Data Loading"
+author: "Remy Garcia-Kakebeen"
+date: "2025-12-17"
+output: pdf_document
+---
+
+## Loading Libraries
+
+```{r libraries}
+# libraries
+library(dplyr)
+library(tidyverse)
+
+library(ggplot2)
+library(GGally)
+library(corrplot)
+
+library(corrplot)
+
+# citation: https://cran.r-project.org/web/packages/fastDummies/fastDummies.pdf
+library(fastDummies)
+library(sjPlot)
+
+library(caret)
+library(lattice)
+library(ggeffects)
+
+# citation: https://www.datacamp.com/tutorial/decision-trees-R
+library(tidymodels)
+library(tidyr)
+
+# citation: https://www.geeksforgeeks.org/r-language/naive-bayes-classifier-in-r-programming/
+library(e1071)
+library(caTools)
+
+# citation: https://www.r-bloggers.com/2021/04/random-forest-in-r/
+library(randomForest)
+
+# citation: https://www.r-bloggers.com/2021/04/deep-neural-network-in-r/
+library(keras)
+library(mlbench)
+library(magrittr)
+library(neuralnet)
+```
+
+## Data Cleaning & Combining Original Datasets
+```{r combining-data}
+# # the code I used to combine the datasets
+# merged_df = merge(user_positions |>
+#                      select(-msa, -rcid, -ultimate_parent_rcid, -ultimate_parent_company_name,
+#                             -url, -linkedin_url), 
+#                    user_education |>
+#                      select(-rsid, -startdate, -enddate), by = "user_id")
+# 
+# non_skills_data = merge(merged_df, user_profiles |> select(-updated_dt), by = "user_id")
+# 
+# write_csv(merge(merged_df, user_profiles |> select(-updated_dt), by = "user_id"), 'non_skills_data.csv')
+```
+
+## Full Datasets
+
+```{r full-datasets, eval = F}
+# This dataset has job posting data from the top S&P
+# 100 companies by market cap between 2024-06-07 and 2025-06-08
+t100_postings <- readr::read_csv('t100_postings.csv')
+
+# This dataset has user position data for LinkedIn profiles from the top S&P
+# 100 companies by market cap between 2024-06-07 and 2025-06-08
+user_positions <- readr::read_csv('user_positions.csv')
+
+# This dataset has user education data for LinkedIn profiles from the top S&P
+# 100 companies by market cap
+user_education <- readr::read_csv('user_education.csv')
+
+# This dataset has user profile data for LinkedIn profiles from the top S&P
+# 100 companies by market cap
+user_profiles <- readr::read_csv('user_profiles.csv')
+
+# This dataset has user skills data for LinkedIn profiles from the top S&P 
+# 100 companies by market cap
+user_skills <- readr::read_csv('user_skills.csv')
+```
+
+## USA-Specific Datasets
+
+```{r usa-datasets}
+# user skills in the USA
+USA_skills_df <- readr::read_csv("USA_skills.csv")
+
+# job postings in the USA
+USA_t100_postings <- readr::read_csv("USA_t100_postings.csv")
+
+# user data in the USA (without skills)
+USA_nonskills_df <- readr::read_csv("USA_nonskills.csv")
+```
+
+## Roles & Role Categories
+
+```{r role-categories}
+# CYBER-RELATED ROLES
+# each cyber-related role category
+feeder_roles <- readr::read_lines('feeder_roles.txt')
+starting_roles <- readr::read_lines('starting_roles.txt')
+intermediate_roles <- readr::read_lines('intermediate_roles.txt')
+advanced_roles <- readr::read_lines('advanced_roles.txt')
+
+# starting, intermediate, and advanced combined
+cyber_roles <- readr::read_lines('cyber_roles.txt')
+
+# ALL POSSIBLE ROLES
+# df with all roles & their categories
+roles_df <- readr::read_csv("role_cats.csv")
+
+# roles
+k1500_roles <- readr::read_csv("1500_roles.txt")
+k150_roles <- readr::read_csv("150_roles.txt")
+k50_roles <- readr::read_csv("50_roles.txt")
+
+# add column that determines whether a role is a cyber-related role or not
+# also add column that determines whether a role is a feeder role into cyber or not
+roles_df <- roles_df |>
+  mutate(cyber_job = ifelse(role_k1500 %in% cyber_roles, 1, 0)) |>
+  mutate(feeder_job = ifelse(role_k1500 %in% feeder_roles, 1, 0))
+```
+
+```{r cyber-role-category-addition}
+# adding cyber & feeder role columns to all datasets
+USA_t100_postings <- USA_t100_postings |>
+  mutate(cyber = as.factor(ifelse(role_k1500 %in% cyber_roles, 1, 0)),
+         feeder = as.factor(ifelse(role_k1500 %in% feeder_roles, 1, 0)))
+
+USA_nonskills_df <- USA_nonskills_df |>
+  mutate(cyber = as.factor(ifelse(role_k1500 %in% cyber_roles, 1, 0)),
+         feeder = as.factor(ifelse(role_k1500 %in% feeder_roles, 1, 0)))
+```
